@@ -1,0 +1,53 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: '0 12 * * 0' # Every Sunday at 12:00 UTC (20:00 China time).
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sync-upstream.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'devicu-awsl/zach-blocklist'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Optional: a fine-grained PAT scoped to this fork with Contents and
+      # Workflows write permissions, needed if upstream changes workflow files.
+      GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Merge upstream into main
+        shell: bash
+        run: |
+          set -euo pipefail
+          # GitHub discovers the parent automatically:
+          # zachlagden/Pi-hole-Optimized-Blocklists.
+          # This preserves fork commits, including this workflow; never force-sync.
+          if ! gh api --method POST "repos/$GH_REPO/merge-upstream" \
+            -H "Accept: application/vnd.github+json" \
+            -f branch=main > sync-result.json; then
+            echo "::error::Upstream sync failed. Resolve any merge conflict or branch restriction. If GitHub rejects changes to workflow files, add a SYNC_TOKEN secret with Contents and Workflows write permissions for this fork."
+            exit 1
+          fi
+          jq . sync-result.json
+          {
+            echo "### Upstream sync"
+            echo
+            echo "Upstream: zachlagden/Pi-hole-Optimized-Blocklists"
+            echo "Destination: $GH_REPO (main)"
+            echo
+            echo '~~~json'
+            jq . sync-result.json
+            echo '~~~'
+          } >> "$GITHUB_STEP_SUMMARY"
